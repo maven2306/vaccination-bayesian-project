@@ -1,6 +1,6 @@
 # Project: Introduction to Bayesian Inference
 
-**Author:** MOLab
+**Author:** Alejandrina Jimenez Guzman, Brian William Hingpit, Joanna Lewandowska Przysiwek, Matteo Venturini
 **Date:** May 1, 2025
 
 ## Project Overview
