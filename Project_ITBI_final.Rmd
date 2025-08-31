@@ -1,0 +1,939 @@
+---
+title: 'Project: Introduction to Bayesian Inference'
+author: "MOLab"
+date: "2025-05-01"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 2
+  pdf_document:
+    toc: true
+    toc_depth: '2'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+knitr::knit_hooks$set(
+   error = function(x, options) {
+     paste('\n\n<div class="alert alert-danger">',
+           gsub('##', '\n', gsub('^##\ Error', '**Error**', x)),
+           '</div>', sep = '\n')
+   },
+   warning = function(x, options) {
+     paste('\n\n<div class="alert alert-warning">',
+           gsub('##', '\n', gsub('^##\ Warning:', '**Warning**', x)),
+           '</div>', sep = '\n')
+   },
+   message = function(x, options) {
+     paste('\n\n<div class="alert alert-info">',
+           gsub('##', '\n', x),
+           '</div>', sep = '\n')
+   }
+)
+```
+
+---
+
+# Load Libraries
+
+```{r warning=F, message=F}
+library(tidyverse)
+library(purrr)
+library(DT)
+library(R2OpenBUGS)
+library(coda)
+library(ggplot2)
+library(patchwork)
+library(HDInterval)
+library(purrr)
+```
+
+---
+
+# Load Data
+
+The full dataset is displayed in the table below.
+<br>
+
+```{r VaccinationDataset}
+geography <- c(rep('Georgia', 10), rep('Wisconsin', 10), rep('Mississippi', 10))
+birth_year <- rep(seq(2011, 2020), 3)
+vaccinated <- c(
+  196, 248, 261, 252, 276, 311, 265, 246, 251, 165,
+  207, 205, 212, 195, 231, 246, 215, 214, 197, 156,
+  171, 208, 190, 215, 243, 276, 290, 242, 304, 161
+)
+sample_size <- c(
+  219, 270, 276, 284, 306, 334, 292, 282, 273, 188,
+  225, 226, 235, 224, 262, 275, 238, 241, 224, 177,
+  198, 230, 217, 239, 272, 307, 321, 276, 324, 181
+)
+
+vacc_data <- data.frame(
+  Geography = geography,
+  Birth_Year = birth_year,
+  Vaccinated = vaccinated,
+  Sample_Size = sample_size
+)
+```
+
+```{r}
+DT::datatable(vacc_data, options = list(scrollX=T))
+```
+
+We also stratify our data according to `Geography` and `Birth_Year`.
+
+```{r VaccinationDataByRegion}
+vacc_data_by_region <- vacc_data %>% 
+  group_by(Geography) %>% 
+  summarize(Vaccinated = sum(Vaccinated), Sample_Size = sum(Sample_Size))
+```
+
+<br>
+<br>
+For `Geography`:
+<br>
+
+```{r}
+DT::datatable(vacc_data_by_region, options = list(scrollX=T))
+```
+
+```{r VaccinationDataByBirthYear}
+vacc_data_by_birthyear <- vacc_data %>%
+  group_by(Birth_Year) %>%
+  summarize(Vaccinated = sum(Vaccinated), Sample_Size = sum(Sample_Size))
+```
+
+<br>
+<br>
+For `Birth_Year`:
+<br>
+
+```{r}
+DT::datatable(vacc_data_by_birthyear, options = list(scrollX=T))
+```
+
+---
+
+# Item 1.
+
+*Derive analytically the posterior of the vaccination coverage per birth year and region. Use a conjugate prior that (1) reflects no knowledge on the vaccination coverage, and (2) reflects that vaccination coverage is typically around 90% or higher. Give posterior summary measures of the vaccination coverage per birth year and region. Is the choice of the prior impacting your results?*
+
+**No Prior Information**
+
+The equation below is the general expression for the posterior $p(\theta|y)$.
+
+$$
+p(\theta|y) = \frac{L(\theta|y)p(\theta)}{p(y)}
+$$
+For a non-informative prior, we can assume a uniform distribution which is also equivalent to a beta distribution with parameters $\alpha=\beta=1$ ( $p(\theta) = Uniform(1, 1) = Beta(1, 1)$ ). Additionally, the likelihood can be expressed as a binomial likelihood ($L(\theta|y) = Binomial(n_g, \frac{y}{n})$). Given these, the posterior would then be: $p(\theta|y) = Beta(y+1, n-y+1)$.
+
+The function below calculates the summary measures of the posterior given the parameters.
+
+```{r CalculateSummaryMeasures}
+calc_summary_measures <- function(n, y, alpha0 = 1, beta0 = 1) {
+  alpha <- y + alpha0
+  beta <- n - y + beta0
+  
+  mode <- (alpha - 1) / (alpha + beta - 2)
+  mean <- alpha / (alpha + beta)
+  median <- qbeta(0.5, alpha, beta)
+  var <- (alpha * beta) / ((alpha + beta)^2 * (alpha + beta + 1))
+  sd <- sqrt(var)
+  
+  return(list(mode=mode, mean=mean, median=median, var=var, sd=sd))
+}
+```
+
+The table below displays the summary measures of the posterior by `Geography`.
+<br>
+
+```{r VaccinationDataByRegion2}
+vacc_data_by_region2 <- vacc_data_by_region %>%
+  bind_cols(
+    pmap_dfr(
+      list(
+        n = vacc_data_by_region$Sample_Size, 
+        y = vacc_data_by_region$Vaccinated
+      ), 
+    calc_summary_measures
+  ))
+```
+
+```{r}
+DT::datatable(
+  vacc_data_by_region2 %>%
+    mutate(
+      mode = round(mode, 3),
+      mean = round(mean, 3),
+      median = round(median, 3),
+      var = round(var, 6),
+      sd = round(sd, 4)
+    ), 
+  options = list(scrollX=T)
+)
+```
+
+<br>
+<br>
+Here are the summary measures stratified according to `Birth_Year`.
+<br>
+
+```{r VaccinationDataByBirthYear2}
+vacc_data_by_birthyear2 <- vacc_data_by_birthyear %>%
+  bind_cols(
+    pmap_dfr(
+      list(
+        n = vacc_data_by_birthyear$Sample_Size, 
+        y = vacc_data_by_birthyear$Vaccinated
+      ), 
+    calc_summary_measures
+  ))
+```
+
+```{r}
+DT::datatable(
+  vacc_data_by_birthyear2 %>%
+    mutate(
+      mode = round(mode, 3),
+      mean = round(mean, 3),
+      median = round(median, 3),
+      var = round(var, 6),
+      sd = round(sd, 4)
+    ), 
+  options = list(scrollX=T)
+)
+```
+
+<br>
+<br>
+And here are the summary measures for each pair of `Geography` and `Birth_Year`.
+<br>
+
+```{r}
+vacc_data2 <- vacc_data %>%
+  bind_cols(
+    pmap_dfr(
+      list(
+        n = vacc_data$Sample_Size, 
+        y = vacc_data$Vaccinated
+      ), 
+    calc_summary_measures
+  ))
+```
+
+```{r}
+DT::datatable(
+  vacc_data2 %>%
+    mutate(
+      mode = round(mode, 3),
+      mean = round(mean, 3),
+      median = round(median, 3),
+      var = round(var, 6),
+      sd = round(sd, 4)
+    ), 
+  options = list(scrollX=T)
+)
+```
+
+<br>
+<br>
+**With Prior Information: Vaccination Coverage is 90% or Higher**
+
+With an informative prior, the posterior distribution still follows a beta distribution but with parameters $\alpha = y + \alpha_0$ and $\beta = n-y+\beta_0$ ( $p(\theta|y)=Beta(y+\alpha_0, n-y+\beta_0)$ ) where $\alpha_0$ and $\beta_0$ are the parameters of the beta prior.
+
+Since the prior states that the vaccination coverage is likely 90% or higher, we assume the following beta prior: $p(\theta)=Beta(9, 1)$. This sets the expectation of the parameter at 0.9 ($\mu_{\theta}=0.9$), with the probability density further increasing at higher $\theta$. This satisfies the claim that the vaccination coverage is "likely 90% or higher".
+
+The table below displays the summary measures for posterior with informative prior according to `Geography`.
+<br>
+
+```{r VaccinationDataByRegion3}
+vacc_data_by_region3 <- vacc_data_by_region %>%
+  bind_cols(pmap_dfr(
+    list(n = vacc_data_by_region$Sample_Size, y = vacc_data_by_region$Vaccinated), 
+    ~calc_summary_measures(..1, ..2, alpha0 = 9, beta0 = 1)
+  ))
+```
+
+```{r}
+DT::datatable(
+  vacc_data_by_region3 %>%
+    mutate(
+      mode = round(mode, 3),
+      mean = round(mean, 3),
+      median = round(median, 3),
+      var = round(var, 6),
+      sd = round(sd, 4)
+    ), 
+  options = list(scrollX=T)
+)
+```
+
+<br>
+<br>
+Here is a similar table stratified according to `Birth_Year`.
+<br>
+
+```{r VaccinationDataByBirthYear3}
+vacc_data_by_birthyear3 <- vacc_data_by_birthyear %>%
+  bind_cols(pmap_dfr(
+    list(n = vacc_data_by_birthyear$Sample_Size, y = vacc_data_by_birthyear$Vaccinated), 
+    ~calc_summary_measures(..1, ..2, alpha0 = 9, beta0 = 1)
+  ))
+```
+
+```{r}
+DT::datatable(
+  vacc_data_by_birthyear3 %>%
+    mutate(
+      mode = round(mode, 3),
+      mean = round(mean, 3),
+      median = round(median, 3),
+      var = round(var, 6),
+      sd = round(sd, 4)
+    ), 
+  options = list(scrollX=T)
+)
+```
+
+<br>
+<br>
+Finally, here are the posterior summary measures for the overall data.
+<br>
+
+```{r VaccData3}
+vacc_data3 <- vacc_data %>%
+  bind_cols(pmap_dfr(
+    list(n = vacc_data$Sample_Size, y = vacc_data$Vaccinated), 
+    ~calc_summary_measures(..1, ..2, alpha0 = 9, beta0 = 1)
+  ))
+```
+
+```{r}
+DT::datatable(
+  vacc_data3 %>%
+    mutate(
+      mode = round(mode, 3),
+      mean = round(mean, 3),
+      median = round(median, 3),
+      var = round(var, 6),
+      sd = round(sd, 4)
+    ), 
+  options = list(scrollX=T)
+)
+```
+
+<br>
+<br>
+**Final Answer**
+
+Overall, the difference between the summary measures of the posterior derived from informative and non-informative priors seem to be minute.
+
+
+---
+
+# Item 2.
+
+*Investigate whether there is a change in the vaccination coverage over the birth years 2011-2019 using a logistic regression model*
+
+$$
+Y_{ij} \sim Binom(\pi_{ij}, N_{ij})
+$$
+
+*with*
+
+$$
+logit(\pi_{ij}) = \beta_0 + \beta_1 * BirthYear_j
+$$
+
+*where i is the location, j is birth cohort and ij is the vaccination coverage. Assume non-informative priors for the parameters to be estimated. Write and explain the code in BUGS language.*
+
+<br>
+
+The BUGS model specification is shown below. The number of Vaccinated children is represented as a binomial variable with parameters `p` and `Sample_Size`  (`Vaccinated[i] ~ dbin(p[i], Sample_Size[i])`). Additionally, the regression equation is expressed as `logit(p[i]) <- beta0 + beta1 * (Birth_Year[i] - 2011)`. Here, the logistic regression parameters are `beta0` (intercept) and `beta1` (slope). We also normalize `Birth_Year` by subtracting by the minimum value (2011).
+
+Since we assume non-informative priors, we set `beta0` and `beta1` as a normal distribution with mean that reflects no knowledge about the effect ($\mu_{beta0} = \mu_{beta1} = 0$) and poor precision ($\tau_{beta_0} = \tau_{beta1} = 0.001$). These are reflected in the specified prior distributions (`beta0 ~ dnorm(0, 0.001)` and `beta1 ~ dnorm(0, 0.001)`).
+
+```{r}
+model1 <- function() {
+  # Model specification
+  for (i in 1:N) {
+    Vaccinated[i] ~ dbin(p[i], Sample_Size[i])
+    logit(p[i]) <- beta0 + beta1 * (Birth_Year[i] - 2011)
+  }
+  
+  # Priors
+  beta0 ~ dnorm(0, 0.001)
+  beta1 ~ dnorm(0, 0.001)
+}
+
+vacc_data_2011_2019 <- vacc_data %>%
+  filter(Birth_Year != 2020)
+
+data <- list(
+  Vaccinated = vacc_data_2011_2019$Vaccinated,
+  Birth_Year = vacc_data_2011_2019$Birth_Year,
+  Sample_Size = vacc_data_2011_2019$Sample_Size,
+  N = dim(vacc_data_2011_2019)[1]
+)
+
+inits <- function() {
+  list(beta0 = 0, beta1 = 0)
+}
+```
+
+<br>
+
+---
+
+# Item 3.
+
+*Run the MCMC method and check convergence of the MCMC chains. Give the details on how you checked convergence.*
+
+```{r RunSimulationModel1}
+model1.out <- bugs(
+  data = data,
+  inits = inits,
+  parameters.to.save = c('beta0', 'beta1'),
+  model.file = model1,
+  n.chains = 1,
+  n.iter = 2000
+)
+```
+
+<br>
+To check for convergence, first, we looked at the **traceplots**. Here, we see an erratic/noisy pattern without distinguishable trend. This suggests convergence of regression parameters.
+<br>
+
+```{r TracePlot}
+traceplot(as.mcmc(model1.out$sims.matrix))
+```
+<br>
+<br>
+Additionally, the autocorrelation plot shows that parameter values have low correlation at $lag > 0$. Together with the traceplots, this provides further evidence that the parameter estimates have converged.
+<br>
+
+```{r AutoCorrelation}
+autocorr.plot(as.mcmc(model1.out$sims.matrix))
+```
+<br>
+
+---
+
+# Item 4.
+
+*Make a plot of the posterior densities and give summary measures of the posterior distributions of the model parameters. Interpret the results.*
+
+Summary measures of parameters produced by the MCMC chain are outlined in the table below.
+<br>
+
+```{r SimulationOutput}
+model1.out$summary
+```
+
+<br>
+<br>
+The plots below show the histograms of the parameter values of $beta_0$ and $beta_1$ post-burn-in. We see that the both distributions are approximately normal as represented by the red dashed lines.
+
+```{r warning=F, message=F}
+beta0_dist <- model1.out$sims.matrix %>%
+  ggplot(aes(x = beta0)) +
+  geom_histogram(aes(y = ..density..), fill = 'lightblue', color = 'black') +
+  stat_function(
+    fun = dnorm, 
+    args = list(mean = model1.out$mean$beta0, sd = model1.out$sd$beta0),
+    color = 'red',
+    linetype = 'dashed'
+  ) +
+  labs(title = 'Beta0 Normalized Histogram\nand Normal Curve') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold'))
+
+beta1_dist <- model1.out$sims.matrix %>%
+  ggplot(aes(x = beta1)) +
+  geom_histogram(aes(y = ..density..), fill = 'lightblue', color = 'black') +
+  stat_function(
+    fun = dnorm,
+    args = list(mean = model1.out$mean$beta1, sd = model1.out$sd$beta1),
+    color = 'red',
+    linetype = 'dashed'
+  ) +
+  labs(title = 'Beta1 Normalized Histogram\nand Normal Curve') +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold'))
+
+beta0_dist + beta1_dist
+```
+
+<br>
+
+---
+
+# Item 5.
+
+*Give the posterior estimate of the vaccination coverage per birth year. Compare with the analytical results you obtained in Question 1.*
+
+The posterior estimates of vaccination coverage per `Birth_Year` (aggregated across `Geography`) are shown in the table below.
+
+<br>
+
+```{r VaccDataByBirthYear4}
+# vacc_data_by_birthyear4 <- vacc_data_by_birthyear %>%
+#   filter(Birth_Year != 2020) %>%
+#   mutate(
+#     Logit = model1.out$mean$beta0 + model1.out$mean$beta1 * (Birth_Year - 2011),
+#     MCMC_Prop_Estimate = plogis(Logit)
+#   )
+
+vacc_data_by_birthyear4 <- vacc_data_by_birthyear %>%
+  filter(Birth_Year != 2020) %>%
+  mutate(
+    Logit_List = map(Birth_Year - 2011, ~model1.out$sims.list$beta0 + model1.out$sims.list$beta1 * .x),
+    Inv_Logit_List = map(Logit_List, plogis),
+    MCMC_Prop_Estimate = map_dbl(Inv_Logit_List, mean)
+  )
+```
+
+```{r}
+DT::datatable(
+  vacc_data_by_birthyear4 %>%
+    select(
+      Birth_Year, 
+      Vaccinated, 
+      Sample_Size,
+      MCMC_Prop_Estimate
+    ) %>%
+    mutate(
+      MCMC_Prop_Estimate = round(MCMC_Prop_Estimate, 6)
+    ),
+  options = list(scrollX = T)
+)
+```
+
+<br>
+<br>
+The line plot below compares the observed and estimated vaccination coverage (using mean of the regression parameters). We see that vaccination coverage slightly decreases in more recent `Birth_Year`.
+<br>
+
+```{r}
+vacc_data_by_birthyear4 %>%
+  ggplot() +
+  geom_line(aes(x = Birth_Year, y = Vaccinated / Sample_Size, color = 'Observed')) +
+  geom_point(aes(x = Birth_Year, y = Vaccinated / Sample_Size, color = 'Observed')) +
+  geom_line(aes(x = Birth_Year, y = MCMC_Prop_Estimate, color = 'Estimate')) +
+  geom_point(aes(x = Birth_Year, y = MCMC_Prop_Estimate, color = 'Estimate')) +
+  labs(
+    title = 'Vaccination Coverage Per Year',
+    x = 'Birth Year',
+    y = 'Vaccination Coverage'
+  ) +
+  scale_color_manual(name = 'Legend', values = c('Observed' = 'black', 'Estimate' = 'red')) +
+  guides(color = guide_legend(override.aes = list(size = 5))) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold')) +
+  scale_x_discrete(limits = seq(2011, 2019, 1))
+  
+```
+
+<br>
+<br>
+
+The plot below compares the MCMC posterior estimate with the analytical results - both informative and non-informative - as well as the observed vaccination coverage.
+
+```{r MergeVaccDataByBirthYear}
+merge_vacc_data_by_birthyear <- merge(
+  vacc_data_by_birthyear4,
+  vacc_data_by_birthyear2[c('Birth_Year', 'mean')],
+  by = 'Birth_Year'
+)
+
+merge_vacc_data_by_birthyear <- merge(
+  merge_vacc_data_by_birthyear,
+  vacc_data_by_birthyear3[c('Birth_Year', 'mean')],
+  by = 'Birth_Year'
+)
+
+merge_vacc_data_by_birthyear <- merge_vacc_data_by_birthyear %>%
+  rename(
+    MCMC = MCMC_Prop_Estimate,
+    NonInformative = mean.x,
+    Informative = mean.y
+  )
+```
+
+```{r}
+merge_vacc_data_by_birthyear %>%
+  ggplot() +
+  geom_line(aes(x = Birth_Year, y = MCMC, color = 'MCMC')) + 
+  geom_point(aes(x = Birth_Year, y = MCMC, color = 'MCMC')) +
+  geom_line(aes(x = Birth_Year, y = NonInformative, color = 'Non-informative')) + 
+  geom_point(aes(x = Birth_Year, y = NonInformative, color = 'Non-informative')) +
+  geom_line(aes(x = Birth_Year, y = Informative, color = 'Informative')) + 
+  geom_point(aes(x = Birth_Year, y = Informative, color = 'Informative')) +
+  labs(
+    title = 'Vaccination Coverage Per Year',
+    x = 'Birth Year',
+    y = 'Vaccination Coverage'
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold'))
+```
+
+<br>
+
+---
+
+# Item 6.
+
+*Secondly, investigate whether the vaccination coverage trends are distinct at the different locations by adding a location-specific intercept and slope:*
+
+$$
+logit(\pi_{ij}) = \beta_{0i} + \beta_{1i} * BirthYear_j
+$$
+
+*Use data from the years 2011-2019. Assume non-informative priors for the parameters to be estimated. Write the code in BUGS language. Give a brief summary of the convergence checks you performed. Give the posterior estimates of this model.*
+
+First, we create dummy variables indicating whether the grouped observation came from a Georgia, Wisconsin, or Mississipi.
+<br>
+
+```{r VaccDataDummifiedGeography}
+vacc_data4 <- vacc_data %>%
+  filter(Birth_Year != 2020) %>%
+  mutate(
+    IsGeorgia = ifelse(Geography == 'Georgia', 1, 0),
+    IsWisconsin = ifelse(Geography == 'Wisconsin', 1, 0),
+    IsMississippi = ifelse(Geography == 'Mississippi', 1, 0)
+  )
+```
+
+```{r}
+DT::datatable(vacc_data4, options = list(scrollX = T))
+```
+
+<br>
+<br>
+The BUGS model specification is shown below. Here, similar as `model1`, vaccination count has a binomial distribution with parameters `p` and `Sample_Size`. However, the logistic regression equation is different. We define individual intercepts (`beta0_G`, `beta0_W`, and `beta0_M`) and slopes (`beta1_G`, `beta1_W`, and `beta1_M`) for each location, and use the dummy variables to "activate" only the relevant terms of the equation. Again, we define non-informative priors by using a normal distribution with mean = 0 and precision = 0.001.
+
+```{r}
+model2 <- function() {
+  # Model specification
+  for (i in 1:N) {
+    Vaccinated[i] ~ dbin(p[i], Sample_Size[i])
+    logit(p[i]) <- 
+      (beta0_G + beta1_G * (Birth_Year[i] - 2011)) * IsGeorgia[i] + 
+      (beta0_W + beta1_W * (Birth_Year[i] - 2011)) * IsWisconsin[i] + 
+      (beta0_M + beta1_M * (Birth_Year[i] - 2011)) * IsMississippi[i]
+  }
+  
+  # Priors
+  beta0_G ~ dnorm(0, 0.001)
+  beta1_G ~ dnorm(0, 0.001)
+  beta0_W ~ dnorm(0, 0.001)
+  beta1_W ~ dnorm(0, 0.001)
+  beta0_M ~ dnorm(0, 0.001)
+  beta1_M ~ dnorm(0, 0.001)
+}
+
+data2 <- list(
+  Vaccinated = vacc_data4$Vaccinated,
+  Birth_Year = vacc_data4$Birth_Year,
+  Sample_Size = vacc_data4$Sample_Size,
+  IsGeorgia = vacc_data4$IsGeorgia,
+  IsWisconsin = vacc_data4$IsWisconsin,
+  IsMississippi = vacc_data4$IsMississippi,
+  N = dim(vacc_data4)[1]
+)
+
+inits2 <- function() {
+  list(
+    beta0_G = 0, 
+    beta1_G = 0,
+    beta0_W = 0,
+    beta1_W = 0,
+    beta0_M = 0,
+    beta1_M = 0
+  )
+}
+```
+
+```{r RunSimulationModelw}
+model2.out <- bugs(
+  data = data2,
+  inits = inits2,
+  parameters.to.save = c(
+    'beta0_G', 
+    'beta1_G',
+    'beta0_W',
+    'beta1_W',
+    'beta0_M',
+    'beta1_M'
+  ),
+  model.file = model2,
+  n.chains = 1,
+  n.iter = 2000
+)
+```
+
+Posterior estimates are summarized in the table below. The mean estimates suggest that Georgia and Wisconsin had decreasing vaccination coverage starting 2011, while Mississippi's vaccination coverage improved. However, it should be noted that the effects are not highly significant.
+<br>
+
+```{r}
+model2.out$summary
+```
+
+<br>
+<br>
+We can see the traceplot for each parameter below. Again, the post-burn-in parameter values display noisy and without distinguishable pattern, indicative of convergence.
+<br>
+
+```{r}
+traceplot(as.mcmc(model2.out$sims.matrix))
+```
+
+<br>
+<br>
+The autocorrelation plots show independence between $\beta^{(k)}$ and $\beta^{(k+m)}$ parameters. Together with the traceplots, this suggest convergence in the MCMC.
+<br>
+
+```{r}
+autocorr.plot(as.mcmc(model2.out$sims.matrix))
+```
+
+<br>
+
+---
+
+# Item 7.
+
+*What is the probability (a posteriori) that there is an increase in vaccination coverage (per location)?*
+
+For Georgia, the probability that the effect is positive is:
+
+```{r}
+sum(model2.out$sims.list$beta1_G > 0) / length(model2.out$sims.list$beta1_G)
+```
+
+
+```{r}
+pnorm(0, mean = model2.out$summary['beta1_G', 'mean'], sd = model2.out$summary['beta1_G', 'sd'], lower.tail = F)
+```
+
+For Wisconsin, the probability that the effect is positive is:
+
+```{r}
+sum(model2.out$sims.list$beta1_W > 0) / length(model2.out$sims.list$beta1_W)
+```
+
+```{r}
+pnorm(0, mean = model2.out$summary['beta1_W', 'mean'], sd = model2.out$summary['beta1_W', 'sd'], lower.tail = F)
+```
+
+For Mississippi, the probability that the effect is positive is:
+
+```{r}
+sum(model2.out$sims.list$beta1_M > 0) / length(model2.out$sims.list$beta1_M)
+```
+
+```{r}
+pnorm(0, mean = model2.out$summary['beta1_M', 'mean'], sd = model2.out$summary['beta1_M', 'sd'], lower.tail = F)
+```
+
+<br>
+
+---
+
+# Item 8.
+
+*Make a plot of the estimated vaccination coverage (per location and birth year), including the uncertainty on the estimates. Include also the observed vaccination proportion in the plot.*
+
+```{r}
+calc_cred_interval <- function(birth_year, isGeorgia, isWisconsin, isMississippi, bugs.model) {
+  pred_logit <- 
+    (bugs.model$sims.list$beta0_G + bugs.model$sims.list$beta1_G * (birth_year - 2011)) * isGeorgia +
+    (bugs.model$sims.list$beta0_W + bugs.model$sims.list$beta1_W * (birth_year - 2011)) * isWisconsin +
+    (bugs.model$sims.list$beta0_M + bugs.model$sims.list$beta1_M * (birth_year - 2011)) * isMississippi
+  
+  pred_vacc_cov <- plogis(pred_logit)
+  
+  vacc_cov_cred_int <- hdi(pred_vacc_cov)
+  
+  return(vacc_cov_cred_int)
+}
+```
+
+```{r}
+(check <- calc_cred_interval(2013, 1, 0, 0, model2.out))
+```
+
+The plot below compares the observed and estimated vaccination coverage (using means of the sampled parameters) across `Birth_Year` for the three locations (`Geography`). The error bars correspond to the 95% highest density credibility interval of the sampled vaccination coverage. 
+
+```{r}
+vacc_data5 <- vacc_data4 %>%
+  rowwise() %>%
+  mutate(
+    Observed_Vacc_Cov = Vaccinated / Sample_Size,
+    Vacc_Cov_Low = calc_cred_interval(Birth_Year, IsGeorgia, IsWisconsin, IsMississippi, model2.out)['lower'],
+    Vacc_Cov_High = calc_cred_interval(Birth_Year, IsGeorgia, IsWisconsin, IsMississippi, model2.out)['upper'],
+  ) %>%
+  ungroup()
+
+vacc_data5 <- vacc_data5 %>%
+  mutate(
+    Logit_List = pmap(
+      list(Birth_Year - 2011, IsGeorgia, IsWisconsin, IsMississippi),
+      ~(
+        (model2.out$sims.list$beta0_G + model2.out$sims.list$beta1_G * ..1) * ..2 +
+        (model2.out$sims.list$beta0_W + model2.out$sims.list$beta1_W * ..1) * ..3 +
+        (model2.out$sims.list$beta0_M + model2.out$sims.list$beta1_M * ..1) * ..4
+      )
+    ),
+    Inv_Logit_List = map(Logit_List, plogis),
+    Estimated_Vacc_Cov = map_dbl(Inv_Logit_List, mean)
+  )
+```
+
+```{r}
+vacc_data5 %>%
+  ggplot(aes(color = Geography)) +
+  geom_line(aes(x = Birth_Year, y = Observed_Vacc_Cov), linewidth = 1) +
+  geom_point(aes(x = Birth_Year, y = Observed_Vacc_Cov), size = 4) +
+  geom_line(aes(x = Birth_Year, y = Estimated_Vacc_Cov), linetype = 'dashed') +
+  geom_point(aes(x = Birth_Year, y = Estimated_Vacc_Cov)) +
+  geom_errorbar(aes(x = Birth_Year, ymin = Vacc_Cov_Low, ymax = Vacc_Cov_High)) +
+  labs(
+    title = 'Observed (Solid) and Estimated (Dashed) Vaccination Coverage',
+    x = 'Birth Year',
+    y = 'Vaccination Coverage'
+  ) +
+  facet_wrap(~Geography) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold'))
+```
+
+<br>
+
+---
+
+# Item 9.
+
+*Investigate whether the observed number of vaccinated children in 2020 is in line with the expectations from earlier years. For this, compare the observed number of vaccinated children in 2020 with the prediction intervals for number of vaccinated children in 2020.*
+
+
+First, we get a sample of the predicted number of vaccinated children using the post-burn-in beta parameters.
+
+```{r}
+# Get random samples of the beta parameters
+beta0_samples <- model1.out$sims.list$beta0
+beta1_samples <- model1.out$sims.list$beta1
+X <- 2020 - 2011
+
+# Get random samples of the logit given the sampled beta
+logit_pred <- beta0_samples + beta1_samples * X
+
+# Convert logit to probability
+p_new <- plogis(logit_pred)
+
+# Given the probabilities, obtain random samples of number of vaccinated (at fixed sample size n=546)
+y_new <- rbinom(length(p_new), size = 546, prob = p_new)
+```
+
+The distribution of the sampled values seem to be a little bit skewed but a normal distribution still fits the data well.
+
+```{r}
+ggplot(data.frame(y_new = y_new), aes(x = y_new)) +
+  geom_histogram(aes(y = ..density..), fill = 'lightblue', color = 'black') +
+  stat_function(
+    fun = dnorm,
+    args = list(mean = mean(y_new), sd = sd(y_new)),
+    color = 'red',
+    linetype = 'dashed'
+  ) +
+  labs(
+    title = 'Distribution of the Sampled Vaccinated Children and Normal Curve',
+    x = 'Number of Vaccinated Children'
+  ) +
+  theme_bw() +
+  theme(plot.title = element_text(hjust = 0.5, face = 'bold'))
+```
+
+<br>
+<br>
+From the sampled predicted number of vaccinated children, we can calculate the equal tail and highest density prediction intervals.
+
+Equal tail credibility interval ($\alpha=0.05$):
+
+```{r}
+quantile(y_new, probs = c(0.025, 0.975))
+```
+
+Highest density credibility interval ($\alpha=0.05$):
+
+```{r}
+library(HDInterval)
+
+hdi(y_new)
+```
+
+Both credibility intervals are almost identical since the distribution is quite symmetric.
+
+<br>
+
+---
+
+# Item 10.
+
+*Make pairwise comparisons of the vaccination coverage in 2019 by estimating the ratio of the vaccination coverage in 2019 in two locations. Interpret the results.*
+
+```{r}
+X <- 2019 - 2011
+
+beta0_G_vect <- model2.out$sims.list$beta0_G
+beta1_G_vect <- model2.out$sims.list$beta1_G
+beta0_W_vect <- model2.out$sims.list$beta0_W
+beta1_W_vect <- model2.out$sims.list$beta1_W
+beta0_M_vect <- model2.out$sims.list$beta0_M
+beta1_M_vect <- model2.out$sims.list$beta1_M
+
+G_vs_W <- plogis(beta0_G_vect + beta1_G_vect * X) / plogis(beta0_W_vect + beta1_W_vect * X)
+G_vs_M <- plogis(beta0_G_vect + beta1_G_vect * X) / plogis(beta0_M_vect + beta1_M_vect * X)
+M_vs_W <- plogis(beta0_M_vect + beta1_M_vect * X) / plogis(beta0_W_vect + beta1_W_vect * X)
+```
+
+**Georgia vs Wisconsin**
+
+The 95% credibility interval of the ratio between the vaccination coverage of Georgia and Wisconsin ranges from about 0.98 to 1.05. This indicates that Georgia's vaccination coverage is about 2% less to 5% more than Wisconsin's during 2019.
+
+```{r}
+print('HD Interval')
+hdi(G_vs_W)
+print('Equal Tail Interval')
+quantile(G_vs_W, probs = c(0.025, 0.975))
+```
+
+**Georgia vs Mississippi**
+
+The 95% credibility interval of the ratio between the vaccination coverage of Georgia and Wisconsin ranges from about 0.96 to 1.02. This indicates that Georgia's vaccination coverage is about 4% less to 2% more than Mississippi's during 2019.
+
+```{r}
+print('HD Interval')
+hdi(G_vs_M)
+print('Equal Tail Interval')
+quantile(G_vs_M, probs = c(0.025, 0.975))
+```
+
+**Mississippi vs Wisconsin**
+
+The 95% credibility interval of the ratio between the vaccination coverage of Georgia and Wisconsin ranges from about 1.00 to 1.06. This indicates that Mississippi's vaccination coverage is about the same to 6% more than Wisconsin's during 2019.
+
+```{r}
+print('HD Interval')
+hdi(M_vs_W)
+print('Equal Tail Interval')
+quantile(M_vs_W, probs = c(0.025, 0.975))
+```
+
+
+
+
