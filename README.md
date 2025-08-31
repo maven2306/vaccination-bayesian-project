@@ -60,7 +60,9 @@ Convergence of the MCMC chains was assessed using traceplots and autocorrelation
 
 ## How to View
 
-To view the full project report, including all tables and plots, open the `project.html` file or run the `project.rmd` file in Rstudio.
+To view the full project report, including all tables and plots: 
+1) `git clone https://github.com/maven2306/vaccination-bayesian-project.git`
+2) open the `project.html` file or run the `project.rmd` file in Rstudio.
 
 ## R Libraries Used
 
