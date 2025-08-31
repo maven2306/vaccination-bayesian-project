@@ -1,6 +1,6 @@
 ---
 title: 'Project: Introduction to Bayesian Inference'
-author: "MOLab"
+author: "Alejandrina Jimenez Guzman, Brian William Hingpit, Joanna Lewandowska Przysiwek, Matteo Venturini"
 date: "2025-05-01"
 output:
   html_document:
@@ -933,6 +933,7 @@ hdi(M_vs_W)
 print('Equal Tail Interval')
 quantile(M_vs_W, probs = c(0.025, 0.975))
 ```
+
 
 
 
