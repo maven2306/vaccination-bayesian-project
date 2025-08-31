@@ -60,7 +60,7 @@ Convergence of the MCMC chains was assessed using traceplots and autocorrelation
 
 ## How to View
 
-To view the full project report, including all tables and plots, open the `project.html` file or run the `project.rmd` file.
+To view the full project report, including all tables and plots, open the `project.html` file or run the `project.rmd` file in Rstudio.
 
 ## R Libraries Used
 
