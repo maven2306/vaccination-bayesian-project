@@ -5,7 +5,7 @@
 > Date: May 1, 2025
 
 ## Full analysis
-To view the full analysis, please [click here](Project_ITBI_final.html) and download the file.
+To view the full analysis, please [click here](Project_ITBI_final.html) and download the HTML file.
 
 ## Project Overview
 
