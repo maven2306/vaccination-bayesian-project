@@ -4,9 +4,6 @@
 > 
 > Date: May 1, 2025
 
-## Full analysis
-To view the full analysis, please [click here](Project_ITBI_final.html) and download the HTML file.
-
 ## Project Overview
 
 This project provides a comprehensive analysis of vaccination coverage data using Bayesian inference techniques. The dataset includes the number of vaccinated children and the total sample size for birth years 2011 through 2020, stratified by three US states: Georgia, Wisconsin, and Mississippi.
