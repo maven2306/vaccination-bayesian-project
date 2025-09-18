@@ -1,4 +1,4 @@
-# Project: Introduction to Bayesian Inference
+# Vaccination Coverage Analysis using Bayesian Inference
 
 **Author:** Alejandrina Jimenez Guzman, Brian William Hingpit, Joanna Lewandowska Przysiwek, Matteo Venturini
 **Date:** May 1, 2025
